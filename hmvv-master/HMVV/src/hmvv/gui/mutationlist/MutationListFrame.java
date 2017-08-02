@@ -1,0 +1,538 @@
+package hmvv.gui.mutationlist;
+
+import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.GridLayout;
+import java.awt.Rectangle;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.io.File;
+import java.io.IOException;
+
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JFileChooser;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTabbedPane;
+import javax.swing.JTextField;
+import javax.swing.border.EmptyBorder;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.filechooser.FileFilter;
+
+import hmvv.gui.GUICommonTools;
+import hmvv.gui.mutationlist.tablemodels.BasicTableModel;
+import hmvv.gui.mutationlist.tablemodels.ClinVarTableModel;
+import hmvv.gui.mutationlist.tablemodels.CoordinatesTableModel;
+import hmvv.gui.mutationlist.tablemodels.G1000TableModel;
+import hmvv.gui.mutationlist.tablemodels.MutationList;
+import hmvv.gui.mutationlist.tablemodels.SampleTableModel;
+import hmvv.gui.mutationlist.tables.BasicTable;
+import hmvv.gui.mutationlist.tables.ClinVarTable;
+import hmvv.gui.mutationlist.tables.CommonTable;
+import hmvv.gui.mutationlist.tables.CoordinatesTable;
+import hmvv.gui.mutationlist.tables.G1000Table;
+import hmvv.gui.mutationlist.tables.SampleTable;
+import hmvv.gui.sampleList.ReportFrame;
+import hmvv.io.DatabaseCommands;
+import hmvv.io.MutationReportGenerator;
+import hmvv.model.Mutation;
+
+public class MutationListFrame extends JFrame {
+	private static final long serialVersionUID = 1L;
+		
+	private BasicTable basicTabTable;
+	private BasicTableModel basicTabTableModel;
+
+	private CoordinatesTable coordinatesTabTable;
+	private CoordinatesTableModel coordinatesTabTableModel;
+	
+	private G1000Table g1000TabTable;
+	private G1000TableModel g1000TabTableModel;
+	
+	private ClinVarTable clinVarTabTable;
+	private ClinVarTableModel clinVarTabTableModel;
+	
+	private SampleTable sampleTabTable;
+	private SampleTableModel sampleTabTableModel;
+	
+	private MutationList mutationList;
+	
+	private JPanel contentPane;
+	private JTabbedPane tabbedPane;
+	private CommonTable selectedTable;
+	
+	private JCheckBox reportedOnlyCheckbox;
+	private JCheckBox cosmicOnlyCheckbox;
+	private JButton shortReportButton;
+	private JButton longReportButton;
+	private JButton resetButton;
+	private JButton exportButton;
+	
+	private JTextField textFreqFrom;
+	private JTextField textVarFreqTo;
+	private JTextField minReadDepthTextField;
+	private JTextField occurenceFromTextField;
+	private JTextField maxPopulationFrequencyTextField;
+	
+	/**
+	 * Create the frame.
+	 */
+	public MutationListFrame(Component parent, MutationList mutationList, String title) throws Exception{
+		super("Mutation List - " + title);
+		setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+		
+		Rectangle bounds = GUICommonTools.getBounds(parent);
+		setSize((int)(bounds.width*.85), (int)(bounds.height*.85));
+		setMinimumSize(new Dimension(900, getHeight()/2));
+		
+		this.mutationList = mutationList;
+		
+		contentPane = new JPanel();
+		contentPane.setBorder(new EmptyBorder(10, 10, 10, 10));
+		setContentPane(contentPane);
+		
+		constructFilterPanel();
+		
+		constructTabs();
+		layoutComponents();
+		createSortChangeListener();
+		setLocationRelativeTo(parent);
+		reset();
+		
+		loadMissingDataAsynchronous();
+	}
+	
+	private void constructFilterPanel() {
+		constructCheckBoxFilters();
+		constructTextFieldFilters();
+		constructButtons();
+	}
+
+	private void constructTabs(){
+		basicTabTableModel = new BasicTableModel(mutationList);
+		basicTabTable = new BasicTable(this, basicTabTableModel);
+		basicTabTable.setAutoCreateRowSorter(true);
+		
+		coordinatesTabTableModel = new CoordinatesTableModel(mutationList);
+		coordinatesTabTable = new CoordinatesTable(this, coordinatesTabTableModel);
+		coordinatesTabTable.setAutoCreateRowSorter(true);
+		
+		g1000TabTableModel = new G1000TableModel(mutationList);
+		g1000TabTable = new G1000Table(this, g1000TabTableModel);
+		g1000TabTable.setAutoCreateRowSorter(true);
+		
+		clinVarTabTableModel = new ClinVarTableModel(mutationList);
+		clinVarTabTable = new ClinVarTable(this, clinVarTabTableModel);
+		clinVarTabTable.setAutoCreateRowSorter(true);
+
+		sampleTabTableModel = new SampleTableModel(mutationList);
+		sampleTabTable = new SampleTable(this, sampleTabTableModel);
+		sampleTabTable.setAutoCreateRowSorter(true);
+	}
+
+	private void constructCheckBoxFilters(){
+		ActionListener actionListener = new ActionListener() {
+			public void actionPerformed(ActionEvent e) {
+				applyRowFilters();
+			}
+		};
+		
+		cosmicOnlyCheckbox = new JCheckBox("Show Cosmic Only");
+		cosmicOnlyCheckbox.addActionListener(actionListener);
+		cosmicOnlyCheckbox.setFont(GUICommonTools.TAHOMA_BOLD_14);
+		
+		reportedOnlyCheckbox = new JCheckBox("Show Reported Only");
+		reportedOnlyCheckbox.addActionListener(actionListener);
+		reportedOnlyCheckbox.setFont(GUICommonTools.TAHOMA_BOLD_14);
+	}
+	
+	private void constructTextFieldFilters(){
+		DocumentListener documentListener = new DocumentListener(){
+			public void changedUpdate(DocumentEvent e) {
+				applyRowFilters();
+			}
+			public void removeUpdate(DocumentEvent e) {
+				applyRowFilters();
+			}
+			public void insertUpdate(DocumentEvent e) {
+				applyRowFilters();
+			}
+		};
+		
+		int textFieldColumnWidth = 5;
+		textFreqFrom = new JTextField();
+		textFreqFrom.getDocument().addDocumentListener(documentListener);
+		textFreqFrom.setColumns(textFieldColumnWidth);
+
+		textVarFreqTo = new JTextField();
+		textVarFreqTo.getDocument().addDocumentListener(documentListener);
+		textVarFreqTo.setColumns(textFieldColumnWidth);
+		
+		minReadDepthTextField = new JTextField();
+		minReadDepthTextField.getDocument().addDocumentListener(documentListener);
+		minReadDepthTextField.setColumns(textFieldColumnWidth);
+		
+		occurenceFromTextField = new JTextField();
+		occurenceFromTextField.getDocument().addDocumentListener(documentListener);
+		occurenceFromTextField.setColumns(textFieldColumnWidth);
+		
+		maxPopulationFrequencyTextField = new JTextField();
+		maxPopulationFrequencyTextField.getDocument().addDocumentListener(documentListener);
+		maxPopulationFrequencyTextField.setColumns(textFieldColumnWidth);
+	}
+	
+	private void constructButtons(){
+		shortReportButton = new JButton("Short Report");
+		shortReportButton.setToolTipText("Generate a short report for the mutations marked as reported");
+		shortReportButton.setFont(GUICommonTools.TAHOMA_BOLD_13);
+		
+		longReportButton = new JButton("Long Report");
+		longReportButton.setToolTipText("Generate a long report for the mutations marked as reported");
+		longReportButton.setFont(GUICommonTools.TAHOMA_BOLD_13);
+		
+		resetButton = new JButton("Reset");
+		resetButton.setToolTipText("Clear all filters and reset table");
+		resetButton.setFont(GUICommonTools.TAHOMA_BOLD_13);
+
+		exportButton = new JButton("Export");
+		exportButton.setToolTipText("Export the current table to file");
+		exportButton.setFont(GUICommonTools.TAHOMA_BOLD_13);
+		
+		ActionListener actionListener = new ActionListener(){
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				if(e.getSource() == shortReportButton){
+					showShortReportFrame();
+				}else if(e.getSource() == longReportButton){
+					showLongReportFrame();
+				}else if(e.getSource() == resetButton){
+					reset();
+				}else if(e.getSource() == exportButton){
+					try{
+						exportTable();
+					}catch(IOException ex){
+						ex.printStackTrace();
+						JOptionPane.showMessageDialog(MutationListFrame.this, ex.getMessage());
+					}
+				}
+			}
+		};
+		
+		shortReportButton.addActionListener(actionListener);
+		longReportButton.addActionListener(actionListener);
+		resetButton.addActionListener(actionListener);
+		exportButton.addActionListener(actionListener);
+	}
+
+	private void showShortReportFrame(){
+		try{
+			String report = MutationReportGenerator.generateShortReport(mutationList);
+			showReportFrame(report);
+		}catch(Exception e){
+			e.printStackTrace();
+			JOptionPane.showMessageDialog(this, e.getMessage());
+		}
+	}
+	
+	private void showLongReportFrame(){
+		try{
+			String report = MutationReportGenerator.generateLongReport(mutationList);
+			showReportFrame(report);
+		}catch(Exception e){
+			e.printStackTrace();
+			JOptionPane.showMessageDialog(this, e.getMessage());
+		}
+	}
+	
+	private void showReportFrame(String report){
+		ReportFrame reportPanel = new ReportFrame(this, report);
+		reportPanel.setVisible(true);
+	}
+	
+	private void layoutComponents(){
+		JScrollPane basicTabScrollPane = new JScrollPane(basicTabTable, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+		JScrollPane coordinatesTabScrollPane = new JScrollPane(coordinatesTabTable, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+		JScrollPane g1000TabScrollPane = new JScrollPane(g1000TabTable, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+		JScrollPane clinVarTabScrollPane = new JScrollPane(clinVarTabTable, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+		JScrollPane sampleTabScrollPane = new JScrollPane(sampleTabTable, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+		
+		tabbedPane = new JTabbedPane(JTabbedPane.TOP);
+		tabbedPane.addTab("Basic", null, basicTabScrollPane, null);
+		tabbedPane.addTab("Coordinates", null, coordinatesTabScrollPane, null);
+		tabbedPane.addTab("G1000", null, g1000TabScrollPane, null);
+		tabbedPane.addTab("ClinVar", null, clinVarTabScrollPane, null);
+		tabbedPane.addTab("Sample", null, sampleTabScrollPane, null);
+		selectedTable = basicTabTable;
+		
+		JPanel leftFilterPanel = new JPanel();
+		leftFilterPanel.setLayout(new GridLayout(0,1));
+		JPanel checkboxPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+		checkboxPanel.add(cosmicOnlyCheckbox);
+		checkboxPanel.add(reportedOnlyCheckbox);
+		leftFilterPanel.add(checkboxPanel);
+		
+		//variant frequency
+		JPanel populationFrequencyPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+		JLabel populationFrequencyLabel = new JLabel("Max Population Frequency (altGlobalFreq)");
+		populationFrequencyLabel.setFont(GUICommonTools.TAHOMA_BOLD_14);
+		populationFrequencyPanel.add(populationFrequencyLabel);
+		populationFrequencyPanel.add(maxPopulationFrequencyTextField);
+		leftFilterPanel.add(populationFrequencyPanel);
+		leftFilterPanel.add(new JLabel(""));//take up a space so same number of elements as right filter panel
+		
+		JPanel rightFilterPanel = new JPanel();
+		rightFilterPanel.setLayout(new GridLayout(0,1));
+		
+		//min read depth and occurence filters
+		JPanel readDepthPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+		JLabel minReadDepthLabel = new JLabel("Min Read Depth (readDP)");
+		minReadDepthLabel.setFont(GUICommonTools.TAHOMA_BOLD_14);
+		readDepthPanel.add(minReadDepthLabel);
+		readDepthPanel.add(minReadDepthTextField);
+		
+		JLabel variantFrequencyLabel = new JLabel("Variant Frequency (altFreq)");
+		variantFrequencyLabel.setFont(GUICommonTools.TAHOMA_BOLD_14);
+		JPanel frequencyLayoutPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+		frequencyLayoutPanel.add(variantFrequencyLabel);
+		frequencyLayoutPanel.add(textFreqFrom);
+		frequencyLayoutPanel.add(new JLabel("To"));
+		frequencyLayoutPanel.add(textVarFreqTo);
+		
+		JPanel occurencePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+		JLabel occurenceLabel = new JLabel("Min occurence (occurence)");
+		occurenceLabel.setFont(GUICommonTools.TAHOMA_BOLD_14);
+		occurencePanel.add(occurenceLabel);
+		occurencePanel.add(occurenceFromTextField);
+		
+		rightFilterPanel.add(readDepthPanel);
+		rightFilterPanel.add(frequencyLayoutPanel);
+		rightFilterPanel.add(occurencePanel);
+
+		JPanel filterPanel = new JPanel();
+		filterPanel.setLayout(new GridLayout(1,0));
+		filterPanel.add(leftFilterPanel);
+		filterPanel.add(rightFilterPanel);
+		
+		//Buttons
+		JPanel buttonPanel = new JPanel();
+		GridLayout buttonPanelGridLayout = new GridLayout(0,1);
+		buttonPanelGridLayout.setVgap(5);
+		buttonPanel.setLayout(buttonPanelGridLayout);
+		buttonPanel.add(shortReportButton);
+		
+		buttonPanel.add(longReportButton);
+		buttonPanel.add(resetButton);
+		buttonPanel.add(exportButton);
+		
+		JPanel northPanel = new JPanel();
+		northPanel.setLayout(new BorderLayout());
+		northPanel.add(filterPanel, BorderLayout.CENTER);
+		northPanel.add(buttonPanel, BorderLayout.EAST);
+		
+		JPanel contentPane = new JPanel();
+		contentPane.setLayout(new BorderLayout());
+		contentPane.add(northPanel, BorderLayout.NORTH);
+		contentPane.add(tabbedPane, BorderLayout.CENTER);
+		
+		contentPane.setBorder(new EmptyBorder(15, 15, 15, 15));
+		setContentPane(contentPane);
+	}
+	
+	private void createSortChangeListener(){
+		tabbedPane.addChangeListener(new ChangeListener() {
+	        public void stateChanged(ChangeEvent e) {
+	        	int selectedIndex = tabbedPane.getSelectedIndex();
+	        	
+	        	int[] modelRowToViewRow = new int[selectedTable.getRowCount()];
+	        	for(int i = 0; i < selectedTable.getRowCount(); i++){
+	        		modelRowToViewRow[i] = selectedTable.convertRowIndexToView(i);
+	        	}
+	        	mutationList.sortModel(modelRowToViewRow);
+	        	selectedTable.getRowSorter().setSortKeys(null);
+	        	if(selectedIndex == 0){
+	        		selectedTable = basicTabTable;
+	        	}else if(selectedIndex == 1){
+	        		selectedTable = coordinatesTabTable;
+	        	}else if(selectedIndex == 2){
+	        		selectedTable = g1000TabTable;
+	        	}else if(selectedIndex == 3){
+	        		selectedTable = clinVarTabTable;
+	        	}else if(selectedIndex == 4){
+	        		selectedTable = sampleTabTable;
+	        	}else{
+	        		//undefined
+	        		return;
+	        	}
+	        	selectedTable.resizeColumnWidths();
+	        }
+	    });
+	}
+	
+	private void applyRowFilters(){
+		boolean includeCosmicOnly = cosmicOnlyCheckbox.isSelected();
+		boolean includeReportedOnly = reportedOnlyCheckbox.isSelected();
+		int frequencyFrom =  getNumber(textFreqFrom, 0);
+		int frequencyTo = getNumber(textVarFreqTo, 100);
+		int minOccurence = getNumber(occurenceFromTextField, 0);
+		int minReadDepth = getNumber(minReadDepthTextField, 0);
+		int maxPopulationFrequency = getNumber(maxPopulationFrequencyTextField, 100);
+		mutationList.filterMutations(includeCosmicOnly, includeReportedOnly, frequencyFrom, frequencyTo, minOccurence, minReadDepth, maxPopulationFrequency);
+	}
+	
+	private int getNumber(JTextField field, Integer defaultInt){
+		String value = field.getText();
+		Integer valueInt = null;
+		if(value.equals("")){
+			valueInt = defaultInt;
+		}else{
+			try{
+				valueInt = Integer.parseInt(value);
+			}catch(Exception e){
+				return defaultInt;
+			}
+		}
+		return valueInt;
+	}
+
+	private void reset(){
+		cosmicOnlyCheckbox.setSelected(false);
+		reportedOnlyCheckbox.setSelected(false);		
+		textFreqFrom.setText("0");
+		textVarFreqTo.setText("100");
+		minReadDepthTextField.setText("100");
+		occurenceFromTextField.setText("0");
+		maxPopulationFrequencyTextField.setText("100");
+		applyRowFilters();
+	}
+
+	private void exportTable() throws IOException{
+		JFileChooser saveAs = new JFileChooser();
+		saveAs.setAcceptAllFileFilterUsed(false);
+		saveAs.addChoosableFileFilter(new FileFilter(){
+			@Override
+			public boolean accept(File file) {
+				return file.isDirectory() || file.getName().endsWith(".txt");
+			}
+
+			@Override
+			public String getDescription() {
+				return ".txt file";
+			}
+		});
+		
+		int returnValue = saveAs.showSaveDialog(this);
+		if(returnValue == JFileChooser.APPROVE_OPTION){
+			MutationReportGenerator.exportReport(saveAs.getSelectedFile(), basicTabTableModel, clinVarTabTableModel, coordinatesTabTableModel, g1000TabTableModel, sampleTabTableModel);
+		}
+	}
+	
+	/*
+	 * 
+	 * This section of the class handles the multi-threaded
+	 * interactions between database loading, GUI updating,
+	 * and window closing events. The goal is to keep the
+	 * GUI highly responsive to the user.
+	 * 
+	 */
+	private void loadMissingDataAsynchronous(){
+		isWindowClosed = false; 
+		addWindowListener(new WindowAdapter(){
+			@Override
+			public void windowClosed(WindowEvent arg0) {
+				isWindowClosed = true;
+			}
+		});
+		
+		String tooltip = "Disabled while cosmic data is loading";
+		cosmicOnlyCheckbox.setEnabled(false);
+		cosmicOnlyCheckbox.setToolTipText(tooltip);
+		reportedOnlyCheckbox.setEnabled(false);
+		reportedOnlyCheckbox.setToolTipText(tooltip);
+		resetButton.setEnabled(false);
+		resetButton.setToolTipText(tooltip);
+		textFreqFrom.setEditable(false);
+		textFreqFrom.setToolTipText(tooltip);
+		textVarFreqTo.setEditable(false);
+		textVarFreqTo.setToolTipText(tooltip);
+		minReadDepthTextField.setEditable(false);
+		minReadDepthTextField.setToolTipText(tooltip);
+		occurenceFromTextField.setEditable(false);
+		occurenceFromTextField.setToolTipText(tooltip);
+		maxPopulationFrequencyTextField.setEditable(false);
+		maxPopulationFrequencyTextField.setToolTipText(tooltip);
+		final Thread one = createExtraMutationDataThread(0, 4);
+		final Thread two = createExtraMutationDataThread(1, 4);
+		final Thread three = createExtraMutationDataThread(2, 4);
+		final Thread four = createExtraMutationDataThread(3, 4);
+		
+		Thread waitingThread = new Thread(new Runnable(){
+			@Override
+			public void run() {
+				try{
+					one.join();
+					two.join();
+					three.join();
+					four.join();
+				}catch(Exception e){}
+				cosmicOnlyCheckbox.setEnabled(true);
+				cosmicOnlyCheckbox.setToolTipText("");
+				reportedOnlyCheckbox.setEnabled(true);
+				reportedOnlyCheckbox.setToolTipText("");
+				resetButton.setEnabled(true);
+				resetButton.setToolTipText("");
+				textFreqFrom.setEditable(true);
+				textFreqFrom.setToolTipText("");
+				textVarFreqTo.setEditable(true);
+				textVarFreqTo.setToolTipText("");
+				minReadDepthTextField.setEditable(true);
+				minReadDepthTextField.setToolTipText("");
+				occurenceFromTextField.setEditable(true);
+				occurenceFromTextField.setToolTipText("");
+				maxPopulationFrequencyTextField.setEditable(true);
+				maxPopulationFrequencyTextField.setToolTipText("");
+			}
+		});
+		waitingThread.start();
+	}
+	
+	private Thread createExtraMutationDataThread(int startIndex, int incrementIndex){
+		Thread missingDataThread = new Thread(new Runnable(){
+			@Override
+			public void run() {
+				getExtraMutationData(startIndex, incrementIndex);
+			}
+		});
+		missingDataThread.start();
+		return missingDataThread;
+	}
+	
+	private volatile boolean isWindowClosed;
+	private void getExtraMutationData(int startIndex, int incrementIndex){
+		for(int index = startIndex; index < basicTabTableModel.getRowCount(); index += incrementIndex){
+			if(isWindowClosed){
+				return;
+			}
+			
+			try{
+				Mutation mutation = basicTabTableModel.getMutation(index);
+				String cosmicID = DatabaseCommands.getCosmicID(mutation);
+				int count = DatabaseCommands.getOccurrenceCount(mutation);
+				basicTabTableModel.updateModel(index, cosmicID, count);
+			}catch(Exception e){
+				e.printStackTrace();
+				JOptionPane.showMessageDialog(this, e.getMessage() + " : " + e.getClass().getName() + ": Could not load additional mutation data.");
+			}
+		}
+	}
+}
